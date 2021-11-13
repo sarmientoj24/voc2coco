@@ -59,13 +59,16 @@ def get_image_info(annotation_root, extract_num_from_imgid=True):
 
 def get_coco_annotation_from_obj(obj, label2id):
     label = obj.findtext('name')
-    assert label in label2id, f"Error: {label} is not in label2id !"
+    # assert label in label2id, f"Error: {label} is not in label2id !"
+    if label not in label2id:
+        print(label)
+        return None
     category_id = label2id[label]
     bndbox = obj.find('bndbox')
-    xmin = int(float(bndbox.findtext('xmin'))) - 1
-    ymin = int(float(bndbox.findtext('ymin'))) - 1
-    xmax = int(float(bndbox.findtext('xmax')))
-    ymax = int(float(bndbox.findtext('ymax')))
+    xmin = int(bndbox.findtext('xmin')) - 1
+    ymin = int(bndbox.findtext('ymin')) - 1
+    xmax = int(bndbox.findtext('xmax'))
+    ymax = int(bndbox.findtext('ymax'))
     assert xmax > xmin and ymax > ymin, f"Box size error !: (xmin, ymin, xmax, ymax): {xmin, ymin, xmax, ymax}"
     o_width = xmax - xmin
     o_height = ymax - ymin
@@ -90,8 +93,12 @@ def convert_xmls_to_cocojson(annotation_paths: List[str],
         "annotations": [],
         "categories": []
     }
-    bnd_id = 1  # START_BOUNDING_BOX_ID, TODO input as args ?
+    img_id = 0
+    bnd_id = 0  # START_BOUNDING_BOX_ID, TODO input as args ?
     print('Start converting !')
+
+    print(len(annotation_paths))
+
     for a_path in tqdm(annotation_paths):
         # Read annotation xml
         ann_tree = ET.parse(a_path)
@@ -99,15 +106,37 @@ def convert_xmls_to_cocojson(annotation_paths: List[str],
 
         img_info = get_image_info(annotation_root=ann_root,
                                   extract_num_from_imgid=extract_num_from_imgid)
-        img_id = img_info['id']
+        # have bug: non-unique image IDs
+        # img_id = img_info['id']
+
+
+        num_annotations = 0
+        # Test if there are no annotations inside
+        for obj in ann_root.findall('object'):
+            ann = get_coco_annotation_from_obj(obj=obj, label2id=label2id)
+            if ann is None:
+                print(a_path)
+                exit()
+                continue
+            num_annotations += 1
+        
+        if num_annotations < 1:
+            # print(a_path, " no annotations")
+            continue
+
+        img_id += 1
+        img_info['id'] = img_id
         output_json_dict['images'].append(img_info)
 
         for obj in ann_root.findall('object'):
             ann = get_coco_annotation_from_obj(obj=obj, label2id=label2id)
+            if ann is None:
+                continue
+            bnd_id += 1
             ann.update({'image_id': img_id, 'id': bnd_id})
             output_json_dict['annotations'].append(ann)
-            bnd_id = bnd_id + 1
 
+    print(img_id)
     for label, label_id in label2id.items():
         category_info = {'supercategory': 'none', 'id': label_id, 'name': label}
         output_json_dict['categories'].append(category_info)
